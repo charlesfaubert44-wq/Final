@@ -1,0 +1,19 @@
+# WSCC Investigation Management System - Streamlit Edition
+# Python dependencies for local installation (no admin privileges required)
+
+# Core Framework
+streamlit>=1.28.0
+
+# Data Manipulation
+pandas>=2.0.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.2
+
+# Additional utilities (optional but recommended)
+pillow>=10.0.0  # For image handling (photos feature)
+
+# Natural Language Processing & Smart Search
+scikit-learn>=1.3.0  # For TF-IDF vectorization and similarity matching
+nltk>=3.8.1  # For text processing and tokenization
+numpy>=1.24.0  # For numerical operations (required by scikit-learn)
