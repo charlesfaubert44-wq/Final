@@ -49,10 +49,35 @@ class Database:
                 court TEXT,
                 conclusion TEXT,
                 briefing_note TEXT,
+                involved_parties TEXT,
+                communications TEXT,
+                external_reports TEXT,
+                court_events TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         ''')
+
+        # Add new columns if they don't exist (for existing databases)
+        try:
+            cursor.execute("ALTER TABLE cases ADD COLUMN involved_parties TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE cases ADD COLUMN communications TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE cases ADD COLUMN external_reports TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE cases ADD COLUMN court_events TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         # Officers table
         cursor.execute('''
@@ -76,6 +101,81 @@ class Database:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+        ''')
+
+        # Exhibits table (Evidence Management)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS exhibits (
+                exhibit_id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                exhibit_number TEXT NOT NULL,
+                exhibit_type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                seized_date TEXT NOT NULL,
+                seized_by TEXT NOT NULL,
+                seized_location TEXT,
+                current_location TEXT NOT NULL,
+                current_status TEXT NOT NULL DEFAULT 'CUSTODY',
+                barcode TEXT,
+                quantity INTEGER DEFAULT 1,
+                unit TEXT DEFAULT 'item',
+                weight REAL,
+                dimensions TEXT,
+                serial_number TEXT,
+                make_model TEXT,
+                condition_notes TEXT,
+                photo_path TEXT,
+                digital_file_path TEXT,
+                hash_value TEXT,
+                tags TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (case_id) REFERENCES cases(id)
+            )
+        ''')
+
+        # Chain of Custody table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chain_of_custody (
+                custody_id TEXT PRIMARY KEY,
+                exhibit_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                action_date TEXT NOT NULL,
+                performed_by TEXT NOT NULL,
+                received_by TEXT,
+                from_location TEXT,
+                to_location TEXT,
+                reason TEXT NOT NULL,
+                method TEXT,
+                witness TEXT,
+                authorized_by TEXT,
+                temperature TEXT,
+                seal_number TEXT,
+                condition_before TEXT,
+                condition_after TEXT,
+                notes TEXT,
+                photo_path TEXT,
+                signature_path TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (exhibit_id) REFERENCES exhibits(exhibit_id)
+            )
+        ''')
+
+        # Evidence Storage table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS evidence_storage (
+                storage_id TEXT PRIMARY KEY,
+                location_name TEXT NOT NULL,
+                location_type TEXT NOT NULL,
+                capacity INTEGER,
+                current_count INTEGER DEFAULT 0,
+                access_level TEXT,
+                temperature_controlled INTEGER DEFAULT 0,
+                secure_locked INTEGER DEFAULT 1,
+                notes TEXT,
+                created_at TEXT NOT NULL
             )
         ''')
 
@@ -155,6 +255,10 @@ class Database:
                     'court': json.dumps({}),
                     'conclusion': json.dumps({}),
                     'briefing_note': '',
+                    'involved_parties': json.dumps([]),
+                    'communications': json.dumps([]),
+                    'external_reports': json.dumps([]),
+                    'court_events': json.dumps([]),
                     'created_at': datetime.now().isoformat(),
                     'updated_at': datetime.now().isoformat()
                 },
@@ -179,6 +283,10 @@ class Database:
                     'court': json.dumps({}),
                     'conclusion': json.dumps({}),
                     'briefing_note': '',
+                    'involved_parties': json.dumps([]),
+                    'communications': json.dumps([]),
+                    'external_reports': json.dumps([]),
+                    'court_events': json.dumps([]),
                     'created_at': datetime.now().isoformat(),
                     'updated_at': datetime.now().isoformat()
                 }
@@ -190,15 +298,17 @@ class Database:
                                      incident_date, reported_date, status, priority, description,
                                      assigned_officers, timelines, reports, tasks, evidence,
                                      photos, charges, court, conclusion, briefing_note,
+                                     involved_parties, communications, external_reports, court_events,
                                      created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (case['id'], case['case_number'], case['territory'], case['employer'],
                       case['worker'], case['incident_date'], case['reported_date'],
                       case['status'], case['priority'], case['description'],
                       case['assigned_officers'], case['timelines'], case['reports'],
                       case['tasks'], case['evidence'], case['photos'], case['charges'],
                       case['court'], case['conclusion'], case['briefing_note'],
-                      case['created_at'], case['updated_at']))
+                      case['involved_parties'], case['communications'], case['external_reports'],
+                      case['court_events'], case['created_at'], case['updated_at']))
 
             conn.commit()
 
@@ -218,12 +328,17 @@ class Database:
             case = dict(zip(columns, row))
             # Parse JSON fields
             for field in ['assigned_officers', 'timelines', 'reports', 'tasks',
-                         'evidence', 'photos', 'charges']:
-                if case[field]:
+                         'evidence', 'photos', 'charges', 'involved_parties',
+                         'communications', 'external_reports', 'court_events']:
+                if case.get(field):
                     case[field] = json.loads(case[field])
+                else:
+                    case[field] = []
             for field in ['court', 'conclusion']:
-                if case[field]:
+                if case.get(field):
                     case[field] = json.loads(case[field])
+                else:
+                    case[field] = {}
             cases.append(case)
 
         conn.close()
@@ -245,12 +360,17 @@ class Database:
 
         # Parse JSON fields
         for field in ['assigned_officers', 'timelines', 'reports', 'tasks',
-                     'evidence', 'photos', 'charges']:
-            if case[field]:
+                     'evidence', 'photos', 'charges', 'involved_parties',
+                     'communications', 'external_reports', 'court_events']:
+            if case.get(field):
                 case[field] = json.loads(case[field])
+            else:
+                case[field] = []
         for field in ['court', 'conclusion']:
-            if case[field]:
+            if case.get(field):
                 case[field] = json.loads(case[field])
+            else:
+                case[field] = {}
 
         conn.close()
         return case
@@ -264,19 +384,22 @@ class Database:
             # Serialize JSON fields
             case_data = case.copy()
             for field in ['assigned_officers', 'timelines', 'reports', 'tasks',
-                         'evidence', 'photos', 'charges', 'court', 'conclusion']:
+                         'evidence', 'photos', 'charges', 'involved_parties',
+                         'communications', 'external_reports', 'court_events',
+                         'court', 'conclusion']:
                 if field in case_data and case_data[field]:
                     case_data[field] = json.dumps(case_data[field])
                 else:
-                    case_data[field] = json.dumps([]) if field != 'court' and field != 'conclusion' else json.dumps({})
+                    case_data[field] = json.dumps([]) if field not in ['court', 'conclusion'] else json.dumps({})
 
             cursor.execute('''
                 INSERT INTO cases (id, case_number, territory, employer, worker,
                                  incident_date, reported_date, status, priority, description,
                                  assigned_officers, timelines, reports, tasks, evidence,
                                  photos, charges, court, conclusion, briefing_note,
+                                 involved_parties, communications, external_reports, court_events,
                                  created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (case_data.get('id'), case_data.get('case_number'),
                   case_data.get('territory'), case_data.get('employer'),
                   case_data.get('worker'), case_data.get('incident_date'),
@@ -287,6 +410,8 @@ class Database:
                   case_data.get('evidence', '[]'), case_data.get('photos', '[]'),
                   case_data.get('charges', '[]'), case_data.get('court', '{}'),
                   case_data.get('conclusion', '{}'), case_data.get('briefing_note', ''),
+                  case_data.get('involved_parties', '[]'), case_data.get('communications', '[]'),
+                  case_data.get('external_reports', '[]'), case_data.get('court_events', '[]'),
                   case_data.get('created_at'), case_data.get('updated_at')))
 
             conn.commit()
@@ -305,7 +430,8 @@ class Database:
             # Serialize JSON fields if present
             updates_copy = updates.copy()
             for field in ['assigned_officers', 'timelines', 'reports', 'tasks',
-                         'evidence', 'photos', 'charges', 'court', 'conclusion']:
+                         'evidence', 'photos', 'charges', 'court', 'conclusion',
+                         'involved_parties', 'communications', 'external_reports', 'court_events']:
                 if field in updates_copy and updates_copy[field] is not None:
                     updates_copy[field] = json.dumps(updates_copy[field])
 
@@ -485,3 +611,319 @@ class Database:
             return True
         except Exception as e:
             raise e
+
+    # ==================== EVIDENCE MANAGEMENT ====================
+
+    # EXHIBITS
+
+    def get_next_exhibit_number(self, year: int = None) -> str:
+        """Generate next exhibit number for the year"""
+        if year is None:
+            year = datetime.now().year
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Get count of exhibits for this year
+        cursor.execute('''
+            SELECT COUNT(*) FROM exhibits
+            WHERE exhibit_number LIKE ?
+        ''', (f'E-{year}-%',))
+
+        count = cursor.fetchone()[0] + 1
+        conn.close()
+
+        return f'E-{year}-{count:03d}'
+
+    def add_exhibit(self, exhibit: Dict) -> bool:
+        """Add new exhibit"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO exhibits (exhibit_id, case_id, exhibit_number, exhibit_type,
+                                    category, description, seized_date, seized_by, seized_location,
+                                    current_location, current_status, barcode, quantity, unit,
+                                    weight, dimensions, serial_number, make_model, condition_notes,
+                                    photo_path, digital_file_path, hash_value, tags,
+                                    created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                exhibit.get('exhibit_id'),
+                exhibit.get('case_id'),
+                exhibit.get('exhibit_number'),
+                exhibit.get('exhibit_type'),
+                exhibit.get('category'),
+                exhibit.get('description'),
+                exhibit.get('seized_date'),
+                exhibit.get('seized_by'),
+                exhibit.get('seized_location', ''),
+                exhibit.get('current_location'),
+                exhibit.get('current_status', 'CUSTODY'),
+                exhibit.get('barcode', ''),
+                exhibit.get('quantity', 1),
+                exhibit.get('unit', 'item'),
+                exhibit.get('weight'),
+                exhibit.get('dimensions', ''),
+                exhibit.get('serial_number', ''),
+                exhibit.get('make_model', ''),
+                exhibit.get('condition_notes', ''),
+                exhibit.get('photo_path', ''),
+                exhibit.get('digital_file_path', ''),
+                exhibit.get('hash_value', ''),
+                exhibit.get('tags', ''),
+                exhibit.get('created_at'),
+                exhibit.get('updated_at')
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            raise e
+
+    def get_exhibits_by_case(self, case_id: str) -> List[Dict]:
+        """Get all exhibits for a case"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM exhibits WHERE case_id = ? ORDER BY exhibit_number', (case_id,))
+
+        columns = [desc[0] for desc in cursor.description]
+        exhibits = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        conn.close()
+        return exhibits
+
+    def get_exhibit_by_id(self, exhibit_id: str) -> Optional[Dict]:
+        """Get exhibit by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM exhibits WHERE exhibit_id = ?', (exhibit_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+
+        columns = [desc[0] for desc in cursor.description]
+        exhibit = dict(zip(columns, row))
+
+        conn.close()
+        return exhibit
+
+    def update_exhibit(self, exhibit_id: str, updates: Dict) -> bool:
+        """Update exhibit"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            updates['updated_at'] = datetime.now().isoformat()
+            set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+            values = list(updates.values()) + [exhibit_id]
+
+            cursor.execute(f'UPDATE exhibits SET {set_clause} WHERE exhibit_id = ?', values)
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            raise e
+
+    def get_all_exhibits(self) -> List[Dict]:
+        """Get all exhibits"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM exhibits ORDER BY created_at DESC')
+
+        columns = [desc[0] for desc in cursor.description]
+        exhibits = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        conn.close()
+        return exhibits
+
+    # CHAIN OF CUSTODY
+
+    def add_custody_entry(self, entry: Dict) -> bool:
+        """Add chain of custody entry"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO chain_of_custody (custody_id, exhibit_id, action, action_date,
+                                            performed_by, received_by, from_location, to_location,
+                                            reason, method, witness, authorized_by, temperature,
+                                            seal_number, condition_before, condition_after, notes,
+                                            photo_path, signature_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entry.get('custody_id'),
+                entry.get('exhibit_id'),
+                entry.get('action'),
+                entry.get('action_date'),
+                entry.get('performed_by'),
+                entry.get('received_by', ''),
+                entry.get('from_location', ''),
+                entry.get('to_location', ''),
+                entry.get('reason'),
+                entry.get('method', ''),
+                entry.get('witness', ''),
+                entry.get('authorized_by', ''),
+                entry.get('temperature', ''),
+                entry.get('seal_number', ''),
+                entry.get('condition_before', ''),
+                entry.get('condition_after', ''),
+                entry.get('notes', ''),
+                entry.get('photo_path', ''),
+                entry.get('signature_path', ''),
+                entry.get('created_at')
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            raise e
+
+    def get_custody_chain(self, exhibit_id: str) -> List[Dict]:
+        """Get complete chain of custody for an exhibit"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM chain_of_custody
+            WHERE exhibit_id = ?
+            ORDER BY action_date ASC
+        ''', (exhibit_id,))
+
+        columns = [desc[0] for desc in cursor.description]
+        chain = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        conn.close()
+        return chain
+
+    # EVIDENCE STORAGE
+
+    def add_storage_location(self, location: Dict) -> bool:
+        """Add evidence storage location"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO evidence_storage (storage_id, location_name, location_type,
+                                            capacity, current_count, access_level,
+                                            temperature_controlled, secure_locked, notes,
+                                            created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                location.get('storage_id'),
+                location.get('location_name'),
+                location.get('location_type'),
+                location.get('capacity', 0),
+                location.get('current_count', 0),
+                location.get('access_level', ''),
+                location.get('temperature_controlled', 0),
+                location.get('secure_locked', 1),
+                location.get('notes', ''),
+                location.get('created_at')
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            raise e
+
+    def get_all_storage_locations(self) -> List[Dict]:
+        """Get all storage locations"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM evidence_storage ORDER BY location_name')
+
+        columns = [desc[0] for desc in cursor.description]
+        locations = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        conn.close()
+        return locations
+
+    def get_storage_location(self, storage_id: str) -> Optional[Dict]:
+        """Get storage location by ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM evidence_storage WHERE storage_id = ?', (storage_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+
+        columns = [desc[0] for desc in cursor.description]
+        location = dict(zip(columns, row))
+
+        conn.close()
+        return location
+
+    def update_storage_count(self, storage_id: str, count_change: int) -> bool:
+        """Update storage location count"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE evidence_storage
+                SET current_count = current_count + ?
+                WHERE storage_id = ?
+            ''', (count_change, storage_id))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            raise e
+
+    # EVIDENCE STATISTICS
+
+    def get_evidence_statistics(self) -> Dict:
+        """Get evidence statistics"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        stats = {}
+
+        # Total exhibits
+        cursor.execute('SELECT COUNT(*) FROM exhibits')
+        stats['total_exhibits'] = cursor.fetchone()[0]
+
+        # By status
+        cursor.execute('SELECT current_status, COUNT(*) FROM exhibits GROUP BY current_status')
+        stats['by_status'] = dict(cursor.fetchall())
+
+        # By type
+        cursor.execute('SELECT exhibit_type, COUNT(*) FROM exhibits GROUP BY exhibit_type')
+        stats['by_type'] = dict(cursor.fetchall())
+
+        # By category
+        cursor.execute('SELECT category, COUNT(*) FROM exhibits GROUP BY category')
+        stats['by_category'] = dict(cursor.fetchall())
+
+        # Storage locations
+        cursor.execute('SELECT COUNT(*) FROM evidence_storage')
+        stats['storage_locations'] = cursor.fetchone()[0]
+
+        # Chain of custody entries
+        cursor.execute('SELECT COUNT(*) FROM chain_of_custody')
+        stats['custody_entries'] = cursor.fetchone()[0]
+
+        conn.close()
+        return stats

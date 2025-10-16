@@ -17,3 +17,9 @@ pillow>=10.0.0  # For image handling (photos feature)
 scikit-learn>=1.3.0  # For TF-IDF vectorization and similarity matching
 nltk>=3.8.1  # For text processing and tokenization
 numpy>=1.24.0  # For numerical operations (required by scikit-learn)
+
+# Security Features (for app_secure.py)
+streamlit-authenticator>=0.4.0  # User authentication
+pyyaml>=6.0  # Configuration files
+cryptography>=41.0.0  # Encrypted backups
+pysqlcipher3>=1.2.0  # Database encryption (optional)

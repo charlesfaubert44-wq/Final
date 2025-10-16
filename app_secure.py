@@ -1,7 +1,7 @@
 """
-WSCC Investigation Management System - Streamlit Version (COMPLETE)
-Main application file with ALL features implemented
-Version 2.0 - Complete Implementation
+WSCC Investigation Management System - Streamlit Version (SECURE)
+Main application file with ALL features + Authentication + Privacy Filter
+Version 3.0 - Secure Implementation with Login and Privacy Protection
 """
 
 import streamlit as st
@@ -16,16 +16,57 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
-from evidence_ui import render_evidence_page
-from disclosure import generate_disclosure_package
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
+from privacy_filter import inject_privacy_filter, show_privacy_indicator
 
 # Page configuration
 st.set_page_config(
-    page_title="WSCC Investigation Management",
-    page_icon="🔍",
+    page_title="WSCC Investigation Management (Secure)",
+    page_icon="🔒",
     layout="wide",
     initial_sidebar_state="collapsed"  # Collapse sidebar for horizontal menu
 )
+
+# ==============================================================================
+# AUTHENTICATION
+# ==============================================================================
+
+# Load authentication configuration
+with open('auth_config.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
+
+# Create authenticator object
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days']
+)
+
+# Login widget - using correct API for version 0.4.x
+try:
+    authenticator.login()
+except Exception as e:
+    st.error(f"Login error: {e}")
+    st.stop()
+
+name = st.session_state.get("name")
+authentication_status = st.session_state.get("authentication_status")
+username = st.session_state.get("username")
+
+# Handle authentication states
+if authentication_status == False:
+    st.error('Username/password is incorrect')
+    st.stop()
+elif authentication_status == None:
+    st.warning('Please enter your username and password')
+    st.stop()
+
+# ==============================================================================
+# USER IS AUTHENTICATED - PROCEED WITH APPLICATION
+# ==============================================================================
 
 # Initialize database
 @st.cache_resource
@@ -34,6 +75,9 @@ def get_database():
     return Database()
 
 db = get_database()
+
+# Inject privacy filter after authentication
+inject_privacy_filter(timeout_seconds=60)
 
 # Initialize session state
 if 'current_page' not in st.session_state:
@@ -390,7 +434,6 @@ pages = {
     '📊 Dashboard': 'Dashboard',
     '🔍 Smart Search': 'Search',
     '📁 Cases': 'Cases',
-    '📦 Evidence': 'Evidence',
     '👥 Officers': 'Officers',
     '📄 Reports': 'Reports',
     '⚙️ Settings': 'Settings'
@@ -1208,37 +1251,17 @@ def render_case_details():
         return
 
     with st.expander(f"📋 Case Details: {case['case_number']}", expanded=True):
-        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        col1, col2, col3 = st.columns([2, 1, 1])
 
         with col1:
             st.markdown(f"### {case['case_number']}")
 
         with col2:
-            if st.button("📁 Disclosure", use_container_width=True, help="Generate Court Disclosure Package"):
-                # Generate disclosure package
-                exhibits = db.get_exhibits_by_case(case['id'])
-                html_content = generate_disclosure_package(case, db, exhibits)
-
-                # Open in new window
-                import webbrowser
-                import tempfile
-                import os
-
-                # Create temp file
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
-                    f.write(html_content)
-                    temp_path = f.name
-
-                # Open in browser
-                webbrowser.open('file://' + os.path.realpath(temp_path))
-                st.success("Disclosure package generated! Check your browser.")
-
-        with col3:
             if st.button("✏️ Edit", use_container_width=True):
                 st.session_state.editing_case = not st.session_state.get('editing_case', False)
                 st.rerun()
 
-        with col4:
+        with col3:
             if st.button("❌ Close", use_container_width=True):
                 st.session_state.show_case_details = False
                 st.session_state.current_case_id = None
@@ -2481,6 +2504,25 @@ def render_settings():
 def main():
     """Main application router"""
 
+    # Show user info and logout button in sidebar
+    with st.sidebar:
+        st.markdown("### 👤 User Information")
+        st.markdown(f"**Logged in as:** {name}")
+        st.markdown(f"**Username:** {username}")
+        st.markdown("---")
+
+        if st.button("🚪 Logout", use_container_width=True):
+            authenticator.logout()
+
+        st.markdown("---")
+        st.markdown("🔒 **Security Features Active**")
+        st.markdown("- Login protection")
+        st.markdown("- Privacy filter (60s)")
+        st.markdown("- Secure session")
+
+    # Show privacy filter indicator
+    show_privacy_indicator(timeout_seconds=60)
+
     # Route to appropriate page
     if st.session_state.current_page == 'Dashboard':
         render_dashboard()
@@ -2488,8 +2530,6 @@ def main():
         render_search()
     elif st.session_state.current_page == 'Cases':
         render_cases()
-    elif st.session_state.current_page == 'Evidence':
-        render_evidence_page(db)
     elif st.session_state.current_page == 'Officers':
         render_officers()
     elif st.session_state.current_page == 'Reports':
